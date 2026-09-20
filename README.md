@@ -1,93 +1,292 @@
-# Embedded Take Home
+# Embedded Take-Home: Embedded Systems Track
 
+## Part 0: Base Knowledge Primer
 
+### What is ROS 2?
 
-## Getting started
+ROS 2 (Robot Operating System 2) is a framework for writing robot software as a collection of independent programs called **nodes** that talk to each other by passing messages. Instead of one giant program controlling everything, you have small focused programs — one for motor control, one for GPS, one for camera processing — that communicate over named channels called **topics**.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### Topics, Publishers, Subscribers
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- A **topic** is a named channel (e.g., `/wheel_ticks`) that carries a specific message type.
+- A **publisher** sends messages onto a topic.
+- A **subscriber** receives messages from a topic.
+- Nodes don't know about each other directly — they agree only on a topic name and message type.
 
-## Add your files
+### QoS (Quality of Service)
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+ROS 2 lets you configure delivery guarantees per topic: `RELIABLE` vs `BEST_EFFORT`.
+
+- **`RELIABLE`** guarantees every message is delivered. The publisher retransmits until acknowledged.
+- **`BEST_EFFORT`** sends once and moves on, spending no resources tracking delivery.
+
+**Critical:** a publisher and subscriber on the same topic must have *compatible* QoS settings, or they silently won't connect — no error, no messages, just silence. This trips people up constantly, including AI code generators, which often default to mismatched settings. Compatibility rule: the subscriber's reliability level must be ≤ the publisher's (a BEST_EFFORT publisher cannot serve a RELIABLE subscriber).
+
+### TF2 (Transform Tree)
+
+TF2 tracks position/orientation relationships between reference frames on the robot. Transforms have a **parent frame** and a **child frame** — getting this order backwards is one of the most common ROS bugs (including in AI-generated code). A `odom → base_link` transform describes `base_link` *relative to* `odom`.
+
+### EKF and Sensor Fusion
+
+An Extended Kalman Filter combines multiple noisy sensor sources (e.g., wheel encoders + GPS) into a single best estimate of position, weighting each by how much you trust it at that moment. You won't implement a full EKF here, but you will do a simplified version of exactly this fusion problem.
+
+### How Yonder actually uses this
+
+Our rover fuses wheel encoder data with RTK GPS through a TF2 transform tree (`map → odom → base_link`) to know where it is.
+
+- `base_link` is the rover's body frame (centered on the rover, essentially fixed).
+- `odom` is the rover's position relative to its start point. The `odom → base_link` transform comes from wheel encoders: where is the rover now relative to where it started?
+- `map` is the world frame. The `map → odom` transform comes from GPS: it corrects the odom frame's drift by anchoring it to an absolute reference.
+
+The encoder data comes from six ODrive motor controllers via CAN bus (`odrive_can/ControllerStatus.pos_estimate`). GPS comes from dual NMEA receivers publishing `NavSatFix`. A `robot_localization` EKF fuses everything into `/autonomous/localization/odometry/global`. This task is a simplified version of that pipeline.
+
+**Resources:**
+- [ROS 2 Publisher/Subscriber tutorial](https://docs.ros.org/en/humble/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html)
+- [ROS 2 QoS docs](https://docs.ros.org/en/humble/Concepts/Intermediate/About-Quality-of-Service-Settings.html)
+- [TF2 introduction](https://docs.ros.org/en/humble/Tutorials/Intermediate/Tf2/Introduction-To-Tf2.html)
+
+---
+
+## Starter Repo
+
+### What's in the repo
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/Yonder-Dynamics/take-home-projects/embedded-take-home.git
-git branch -M main
-git push -uf origin main
+odometry_node.py       Your file — stub with function signatures, docstrings,
+                       and TODO comments. This is what you'll implement.
+
+sim/
+  launch.py            Entry point. Run this to start everything.
+  encoder_publisher.py Simulates wheel encoder ticks with realistic noise.
+                       PROVIDED — working, do not modify.
+  gps_publisher.py     Simulates GPS position estimates with noise and outages.
+                       PROVIDED — working, do not modify.
+  ground_truth.py      The rover's true trajectory (circular arc). Internal to
+                       the simulator — you never see this directly, only the
+                       noisy sensor readings derived from it.
+  messages.py          WheelTicks and GPSEstimate message definitions.
+  visualizer.py        Live matplotlib plot. Run with --visualize.
+  rclpy_lite/          A lightweight simulator shim with the same API as real rclpy.
+                       Lets you write ROS-style code without installing ROS.
+  nav_msgs/            Standard ROS message types (Odometry, etc.) as dataclasses.
+  geometry_msgs/       Pose, Twist, Quaternion, etc.
+  tf2_ros/             TransformBroadcaster stub for Stretch Goal A.
+
+requirements.txt       pip dependencies (numpy, matplotlib only).
+AI_LOG.md              Template for your AI usage log (Part 3).
 ```
 
-## Integrate with your tools
+### Familiarisation — read these before you start
 
-* [Set up project integrations](https://gitlab.com/Yonder-Dynamics/take-home-projects/embedded-take-home/-/settings/integrations)
+Before touching `odometry_node.py`, read through the files you're given:
 
-## Collaborate with your team
+**`sim/encoder_publisher.py`** — This is the most important file to read first.
+It publishes `WheelTicks` messages on `/wheel_ticks`. Note:
+- The QoS profile it uses (hint: this is the thing most likely to silently break your node).
+- The three types of noise it injects: dropped ticks, duplicate messages, and clock drift.
+  Each has a comment explaining the real-world phenomenon it simulates.
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+**`sim/gps_publisher.py`** — Publishes `GPSEstimate` on `/gps_estimate`.
+Note the QoS, the update rate, and the outage cycle. The `covariance` field in each
+message tells you how much to trust that reading.
 
-## Test and Deploy
+**`sim/messages.py`** — Defines `WheelTicks` and `GPSEstimate`. Read the docstrings
+carefully — every field is described.
 
-Use the built-in continuous integration in GitLab.
+**`sim/rclpy_lite/`** — You don't need to understand this in depth. It's a lightweight
+shim with the same API as real rclpy (Node, Publisher, Subscriber, QoS, spin). We name
+it `rclpy_lite` rather than `rclpy` to avoid ambiguity if you have ROS installed.
+To port your code to a real ROS 2 system, swap `rclpy_lite` → `rclpy` in your imports.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+**`sim/ground_truth.py`** — The rover drives a circle (radius 10m, 0.5 m/s). You won't
+subscribe to this topic — only `encoder_publisher` and `gps_publisher` use it internally.
+It's provided so you can understand what the true trajectory looks like.
 
-***
+### Running it
 
-# Editing this README
+You need Python 3.10 or newer and no other dependencies beyond numpy and matplotlib.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+1. **Install dependencies:**
 
-## Suggestions for a good README
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+2. **Start the simulator** (from the repo root):
 
-## Name
-Choose a self-explaining name for your project.
+   ```bash
+   python sim/launch.py
+   ```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+   This starts the encoder and GPS publishers, and attempts to load your
+   `odometry_node.py`. Until you implement the subscriptions, your node will
+   start silently and publish nothing.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+3. **Start with clean feeds** while you get the basics working:
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+   ```bash
+   python sim/launch.py --no-faults
+   ```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+   `--no-faults` disables all injected noise — GPS is clean, no duplicate
+   messages, no dropped ticks. Good for verifying your subscriptions connect
+   before tackling the noise.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+4. **Enable the live visualizer** once you have `/odom` publishing:
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+   ```bash
+   python sim/launch.py --visualize
+   ```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+   Opens a matplotlib window showing ground truth, GPS readings, encoder-only
+   dead reckoning, and your fused `/odom` output in real time. The blue line
+   only appears once your node is publishing — it's a visual reward for getting
+   the core task right.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+| Command | What it does |
+| --- | --- |
+| `python sim/launch.py` | Default: noisy feeds |
+| `python sim/launch.py --no-faults` | Clean feeds while building basics |
+| `python sim/launch.py --visualize` | Adds live matplotlib plot |
+| `python sim/launch.py --no-node` | Run simulator only, no odometry node |
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### The feeds
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+| Topic | Rate | Message | QoS |
+| --- | --- | --- | --- |
+| `/wheel_ticks` | ~50 Hz | `WheelTicks{tick_count: int, timestamp: float}` | check the source |
+| `/gps_estimate` | ~1 Hz | `GPSEstimate{x: float, y: float, timestamp: float, covariance: float}` | check the source |
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+- `tick_count` is a cumulative total — it only ever increases (or stays the same on a duplicate).
+- `x` and `y` are in metres, in a local ENU frame where (0, 0) is the rover's start position.
+- `covariance` is in m² — it tells you the GPS reading's uncertainty, useful for fusion weighting.
 
-## License
-For open source projects, say how it is licensed.
+### Things that go wrong on purpose
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+The feeds misbehave in ways representative of real hardware. With `--no-faults` off:
+
+**Wheel encoder:**
+- **Duplicate messages**: the same `(tick_count, timestamp)` pair arrives twice within a few milliseconds. Naive velocity calculation (`delta_ticks / delta_time`) gives a near-zero denominator — NaN or infinite velocity.
+- **Dropped ticks**: the cumulative counter occasionally falls 1 behind ground truth. Each individual drop is tiny (~1.3mm), but they accumulate into a slow drift. GPS fusion is your primary correction for this.
+- **Clock drift**: timestamps drift slowly from wall clock via a random walk. Velocity estimates become less accurate over time.
+
+**GPS:**
+- Gaussian position noise (σ ≈ 0.3m in normal conditions).
+- ~5s outages repeating every ~45s cycle — the feed goes silent then resumes.
+- Elevated noise (σ ≈ 0.8m) for ~10s after each outage resumes (satellite reacquisition).
+- The `covariance` field reflects the actual σ² at each moment.
+
+Deciding how to detect and handle each of these is part of the task.
+
+---
+
+## Part 1: Core Task (required)
+
+Complete `odometry_node.py` so that it:
+
+1. **Subscribes to `/wheel_ticks`** and converts tick count changes into distance and velocity using the provided constants:
+   ```
+   WHEEL_RADIUS_M       = 0.075    # metres
+   TICKS_PER_REVOLUTION = 360
+   DIST_PER_TICK        = (2π × WHEEL_RADIUS) / TICKS_PER_REVOLUTION  ≈ 0.00131 m
+   ```
+
+2. **Handles the injected noise gracefully.** Dropped and duplicate ticks should not silently corrupt your distance estimate or crash your node. Document your approach to detecting and handling each in your write-up.
+
+3. **Subscribes to `/gps_estimate`** and performs a simple fusion between your wheel-derived position and the GPS estimate. A basic weighted average based on which source you trust more at a given moment is sufficient. A full EKF is not required.
+
+4. **Publishes the fused result** as a `nav_msgs/Odometry` message on `/odom`. Check `sim/nav_msgs/msg/__init__.py` and the [real ROS 2 nav_msgs/Odometry spec](https://docs.ros2.org/latest/api/nav_msgs/msg/Odometry.html) for the field layout.
+
+5. **Provides monitoring output** once per second to the terminal showing:
+   - Time since last message from each source
+   - Measured receive rate for `/wheel_ticks` vs expected ~50 Hz
+   - Current fused position (x, y)
+
+### What we're looking for
+
+- Does it run against the provided scaffold and produce a sensible fused position estimate?
+- Does it visibly handle the injected noise (we will be able to tell from your output whether dropped/duplicate ticks corrupted your result)?
+- Correct QoS configuration — your node actually connects to the provided publishers.
+- A write-up explaining your fusion approach, your noise-handling logic, and any design decisions.
+
+---
+
+## Part 2: Stretch Goals (optional)
+
+Pick any/all. Partial, well-reasoned attempts are valued over none.
+
+**A. TF2 broadcaster**
+
+Publish your fused odometry as a proper TF2 transform (`odom → base_link`) instead of just a message. Use the provided `TransformBroadcaster` in `sim/tf2_ros/`. Pay close attention to parent/child frame order and quaternion conventions — this is a common spot where things look right but are backwards.
+
+```python
+from tf2_ros import TransformBroadcaster
+from geometry_msgs.msg import TransformStamped
+```
+
+**B. Confidence-weighted fusion**
+
+Instead of a fixed weighting between wheel and GPS estimates, make the weighting dynamic — e.g., trust wheel odometry more over short time windows and GPS more as wheel-derived drift accumulates. The `covariance` field on `GPSEstimate` messages gives you the GPS uncertainty at each moment. This is conceptually close to what a real EKF does.
+
+**C. Full TF2 (advanced)**
+
+Implement a full `map → odom → base_link` transform system using the published data. Create the `odom → base_link` transform from encoder data, and a `map → odom` correction from GPS. Ensure that querying the rover's `map` position between GPS updates returns a sensible interpolated result.
+
+---
+
+## Part 3: AI Usage Log (required)
+
+Submit a short `AI_LOG.md` with your code (there is a template in the repo root). For each significant use of AI tools, note:
+
+- What you asked
+- What you kept vs. rewrote, and why
+- Anything the AI got wrong that you had to catch
+- How you verified it actually worked correctly (not just that it compiled)
+
+This is not graded on whether you used AI — it is graded on whether you can tell us what it got wrong and why you fixed it.
+
+---
+
+## Rubric
+
+| Criterion | What we're scoring |
+| --- | --- |
+| **Correctness** | Core task runs against the scaffold, produces sensible fused odometry, pub/sub actually connects |
+| **Noise handling** | Dropped/duplicate ticks and noisy GPS are detected and handled, not silently ignored |
+| **Design judgment** | Evidence of intentional choices beyond the minimum (fusion weighting, code structure, sensible defaults) |
+| **Handling ambiguity** | How did they resolve underspecified parts of the task? Did they make a reasonable call and explain it? |
+| **Understanding, not just output** | Can they explain their own code/math? Does the write-up show real comprehension? |
+| **AI verification** | Evidence they tested/verified AI-assisted code rather than taking it on faith (from log + code quality) |
+| **Stretch engagement** (bonus) | Attempted or completed any stretch goal — even partial attempts count positively |
+
+We don't expect a perfect implementation. Those who show genuine effort and learning are the ones who will have a leg up!
+
+---
+
+## Your write-up
+
+*Candidates: replace this section with your own short write-up. Keep it to what a teammate would need to trust your implementation.*
+
+- **Fusion approach.** How do you weight GPS vs wheel odometry? Does the weighting change over time or with signal quality?
+- **Noise handling.** What did you detect, how, and what happens when you detect it? How do you know the dropped ticks are actually affecting your estimate without correction?
+- **Monitoring output.** What thresholds did you choose for staleness warnings and why?
+- **Ambiguity.** What did the task leave underspecified, and what call did you make?
+- **Testing.** How did you verify it was actually working correctly, not just running? What did you check with `--visualize`?
+- **Stretch goals.** Which did you attempt, and how far did you get?
+
+---
+
+## Submitting
+
+1. **Create a public repository on your own GitHub account.**
+2. **Point your clone at it.** Your clone's `origin` is our repo, which you can't push to:
+
+   ```bash
+   git remote set-url origin https://github.com/<your-username>/<your-repo>.git
+   git push -u origin main
+   ```
+
+3. **Check that it's public.** Open your repo's link in a private/incognito browser window. If you can see the code without logging in, so can we.
+4. **Send us the link** in the Google Form you'll be asked to fill out.
+
+Your repo should include your code, your write-up (the section above, in this README), and your `AI_LOG.md`.
