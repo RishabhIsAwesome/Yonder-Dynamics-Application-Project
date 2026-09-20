@@ -49,6 +49,17 @@ The encoder data comes from six ODrive motor controllers via CAN bus (`odrive_ca
 
 ## Starter Repo
 
+### Getting the repo
+
+You need [Git](https://git-scm.com/downloads). The repo is public, so no account or login is needed:
+
+```bash
+git clone https://gitlab.com/Yonder-Dynamics/take-home-projects/embedded-take-home.git
+cd embedded-take-home
+```
+
+Don't want to use Git? Download [a ZIP of the repo](https://gitlab.com/Yonder-Dynamics/take-home-projects/embedded-take-home/-/archive/main/embedded-take-home-main.zip), unzip it, and work in the `embedded-take-home-main` folder. A ZIP has no Git history, so the "Submitting" section below has one extra step for you.
+
 ### What's in the repo
 
 ```
@@ -74,7 +85,17 @@ sim/
 
 requirements.txt       pip dependencies (numpy, matplotlib only).
 AI_LOG.md              Template for your AI usage log (Part 3).
+METHODOLOGY.md         Template for how to run your code and your thought process (Part 4).
 ```
+
+### Files you shouldn't edit
+
+We run your node against our own copy of the simulator, so changes to these won't carry over, and they can make your node behave differently for us than for you:
+
+- Everything in `sim/` (the simulator, message definitions and ROS shims).
+- The constants at the top of `odometry_node.py` (`WHEEL_RADIUS_M`, `TICKS_PER_REVOLUTION`, `DIST_PER_TICK`). They match the real rover's encoder setup.
+
+Your work goes in `odometry_node.py`. You can add new files of your own next to it, and update `requirements.txt`.
 
 ### Familiarisation — read these before you start
 
@@ -191,7 +212,7 @@ Complete `odometry_node.py` so that it:
    DIST_PER_TICK        = (2π × WHEEL_RADIUS) / TICKS_PER_REVOLUTION  ≈ 0.00131 m
    ```
 
-2. **Handles the injected noise gracefully.** Dropped and duplicate ticks should not silently corrupt your distance estimate or crash your node. Document your approach to detecting and handling each in your write-up.
+2. **Handles the injected noise gracefully.** Dropped and duplicate ticks should not silently corrupt your distance estimate or crash your node. Document your approach to detecting and handling each in your `METHODOLOGY.md`.
 
 3. **Subscribes to `/gps_estimate`** and performs a simple fusion between your wheel-derived position and the GPS estimate. A basic weighted average based on which source you trust more at a given moment is sufficient. A full EKF is not required.
 
@@ -207,7 +228,7 @@ Complete `odometry_node.py` so that it:
 - Does it run against the provided scaffold and produce a sensible fused position estimate?
 - Does it visibly handle the injected noise (we will be able to tell from your output whether dropped/duplicate ticks corrupted your result)?
 - Correct QoS configuration — your node actually connects to the provided publishers.
-- A write-up explaining your fusion approach, your noise-handling logic, and any design decisions.
+- A completed `METHODOLOGY.md` that lets us run your code, and explains your fusion approach, your noise-handling logic, and any design decisions.
 
 ---
 
@@ -247,6 +268,19 @@ This is not graded on whether you used AI — it is graded on whether you can te
 
 ---
 
+## Part 4: METHODOLOGY.md (required)
+
+Edit the `METHODOLOGY.md` in the repo root (there is a template) so it covers:
+
+- **How to run your code.** The exact steps for a reviewer to install the dependencies and run your node against the simulator from a fresh clone and see it working.
+- **Your thought process, in bullet points.** Why you built it the way you did: your fusion approach, how you detect and handle the noise, the calls you made on ambiguous parts, and how you tested it.
+
+We read this alongside your code. Write it in your own words: we'd rather see clear reasoning and honest limitations than a polished description.
+
+Keep your `requirements.txt` up to date. It must list every library your code needs.
+
+---
+
 ## Rubric
 
 | Criterion | What we're scoring |
@@ -255,24 +289,11 @@ This is not graded on whether you used AI — it is graded on whether you can te
 | **Noise handling** | Dropped/duplicate ticks and noisy GPS are detected and handled, not silently ignored |
 | **Design judgment** | Evidence of intentional choices beyond the minimum (fusion weighting, code structure, sensible defaults) |
 | **Handling ambiguity** | How did they resolve underspecified parts of the task? Did they make a reasonable call and explain it? |
-| **Understanding, not just output** | Can they explain their own code/math? Does the write-up show real comprehension? |
+| **Understanding, not just output** | Can they explain their own code/math? Does `METHODOLOGY.md` show real comprehension? |
 | **AI verification** | Evidence they tested/verified AI-assisted code rather than taking it on faith (from log + code quality) |
 | **Stretch engagement** (bonus) | Attempted or completed any stretch goal — even partial attempts count positively |
 
 We don't expect a perfect implementation. Those who show genuine effort and learning are the ones who will have a leg up!
-
----
-
-## Your write-up
-
-*Candidates: replace this section with your own short write-up. Keep it to what a teammate would need to trust your implementation.*
-
-- **Fusion approach.** How do you weight GPS vs wheel odometry? Does the weighting change over time or with signal quality?
-- **Noise handling.** What did you detect, how, and what happens when you detect it? How do you know the dropped ticks are actually affecting your estimate without correction?
-- **Monitoring output.** What thresholds did you choose for staleness warnings and why?
-- **Ambiguity.** What did the task leave underspecified, and what call did you make?
-- **Testing.** How did you verify it was actually working correctly, not just running? What did you check with `--visualize`?
-- **Stretch goals.** Which did you attempt, and how far did you get?
 
 ---
 
@@ -286,7 +307,17 @@ We don't expect a perfect implementation. Those who show genuine effort and lear
    git push -u origin main
    ```
 
+   If you downloaded the ZIP instead of cloning, there is no `origin` yet. Start a repo and add yours:
+
+   ```bash
+   git init -b main
+   git add .
+   git commit -m "Initial commit"
+   git remote add origin https://github.com/<your-username>/<your-repo>.git
+   git push -u origin main
+   ```
+
 3. **Check that it's public.** Open your repo's link in a private/incognito browser window. If you can see the code without logging in, so can we.
 4. **Send us the link** in the Google Form you'll be asked to fill out.
 
-Your repo should include your code, your write-up (the section above, in this README), and your `AI_LOG.md`.
+Your repo should include your code, your completed `METHODOLOGY.md`, and your `AI_LOG.md`.
