@@ -7,14 +7,27 @@ Run via:
     python sim/launch.py --no-faults      # clean feeds while getting started
 
 This file uses rclpy_lite, a lightweight simulator shim that mirrors the real
-rclpy (ROS 2 Python) API. The class names, method signatures, and message types
-are identical to real ROS 2 — only the import paths differ:
+rclpy (ROS 2 Python) API. The class names, method signatures and message field
+names match real ROS 2, and the import paths differ:
 
     Real ROS 2:     import rclpy / from rclpy.node import Node
     This shim:      import rclpy_lite as rclpy / from rclpy_lite.node import Node
 
-To run on a real ROS 2 system, swap the imports back to plain rclpy.
+(The README lists the few small differences, e.g. header stamps are plain floats.)
+
+Two things that make life easier here:
+  - Callbacks never run at the same time as each other (real rclpy does the same
+    with its default executor), so you do not need locks around your state.
+  - If a callback raises an exception you will see a traceback in the terminal.
+    The run keeps going, so read the terminal, don't just look for a crash.
 """
+
+import sys
+
+if __name__ == "__main__":
+    # This file is loaded BY the simulator; running it directly can't work.
+    # (Delete this guard if you ever port the node to a real ROS 2 install.)
+    sys.exit("Don't run this file directly. Start everything with:\n\n    python sim/launch.py\n")
 
 import math
 import time
@@ -95,7 +108,8 @@ class OdometryNode(Node):
         # ------------------------------------------------------------------
         self.x: float = 0.0                  # fused position, metres (east)
         self.y: float = 0.0                  # fused position, metres (north)
-        self.heading: float = math.pi / 2.0  # radians (starts heading north)
+        self.heading: float = 0.0            # radians. The rover starts facing EAST (0 rad);
+                                             # x is east, y is north, counter-clockwise is positive
 
         self.last_tick_count: int | None = None
         self.last_tick_time: float | None = None
@@ -104,7 +118,7 @@ class OdometryNode(Node):
         self.last_wheel_time: float | None = None
 
         self.wheel_msg_count: int = 0
-        self.start_time: float = time.time()
+        self.start_time: float = time.monotonic()   # use time.monotonic() to measure durations
 
     # -----------------------------------------------------------------------
     # Wheel encoder callback
@@ -126,14 +140,19 @@ class OdometryNode(Node):
             DUPLICATE messages   The same (tick_count, timestamp) pair is
                                  occasionally re-sent within a few ms.
                                  If you compute velocity as delta_ticks / delta_time
-                                 and delta_time ≈ 0, you will get a NaN or
-                                 infinite velocity. Check for this case.
+                                 and delta_time is 0, you get a NaN, an infinite
+                                 velocity, or a ZeroDivisionError. Check for this.
 
-            DROPPED ticks        The cumulative counter occasionally falls 1
-                                 behind ground truth. Over time this causes
-                                 position to drift short. The drift is small
-                                 per step (~0.13mm) but accumulates — GPS
-                                 fusion is your primary correction mechanism.
+            DROPPED ticks        Now and then the encoder misses one tick (~1.3mm)
+                                 and the cumulative counter is simply 1 lower than
+                                 it should be. The data never shows a gap, so you
+                                 cannot spot an individual drop. The error just
+                                 adds up (~6cm per minute), and GPS fusion is your
+                                 correction. (Think about why you can't see it.)
+
+            CLOCK DRIFT          msg.timestamp wanders slowly away from the real
+                                 time. Use differences between timestamps as
+                                 durations; never compare them with time.time().
 
         Useful constants:
             DIST_PER_TICK   metres per encoder tick (~0.00131 m)
@@ -145,7 +164,10 @@ class OdometryNode(Node):
         #   2. Compute delta_ticks = msg.tick_count - self.last_tick_count
         #   3. Guard against duplicate (delta_ticks == 0 and delta_time ≈ 0).
         #   4. Convert ticks to distance: distance = delta_ticks * DIST_PER_TICK
-        #   5. Update self.x and self.y (the rover moves in the heading direction).
+        #   5. Update self.x and self.y: the rover moves `distance` in the direction
+        #      it is FACING. Ticks tell you how far, not which way. Where does your
+        #      heading come from and how does it change? See "Heading is not
+        #      measured" in the README before you write this line.
         #   6. Call self.publish_odometry().
         pass
 
@@ -224,6 +246,9 @@ class OdometryNode(Node):
             - Seconds since last /gps_estimate message
             - Measured /wheel_ticks receive rate vs expected ~50 Hz
             - Current fused position (x, y)
+
+        Tip: record time.monotonic() each time a message ARRIVES and subtract.
+        Don't use msg.timestamp for this: the encoder's clock drifts.
 
         Example format (feel free to change the layout):
             [odom] pos=(1.23, 0.45)m  enc=0.02s ago @49.8Hz  gps=0.91s ago

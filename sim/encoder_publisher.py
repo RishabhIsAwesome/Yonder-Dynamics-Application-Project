@@ -9,22 +9,30 @@ Noise injected (representative of real encoder/communication issues):
      The cumulative tick counter is decremented by 1 before publishing.
      This simulates a hardware encoder missing a physical pulse due to
      vibration or electrical noise. Effect: position slowly undershoots
-     ground truth. Over ~60 seconds this produces ~8cm of uncorrected drift.
+     ground truth. Each lost tick is ~1.3mm; over ~60 seconds this adds up to
+     ~6cm of uncorrected drift.
+     The lost tick is simply missing from the cumulative count, so the data
+     never shows a gap. You cannot detect an individual drop, only its effect.
 
   2. DUPLICATE MESSAGES (~2% of messages)
      The same (tick_count, timestamp) is published twice within ~5ms.
      This simulates a communication retransmit or interrupt double-fire.
      Effect on naive code: velocity = delta_ticks / delta_time → division
-     by near-zero dt → infinite/NaN velocity reported.
+     by zero dt → an infinite/NaN velocity (or a ZeroDivisionError in plain Python).
 
   3. CLOCK DRIFT (continuous)
-     Timestamps drift relative to wall clock via a slow cumulative random
+     Timestamps drift relative to the host clock via a slow cumulative random
      walk (Gaussian, σ=0.5ms per step). This simulates the independent
      clock on the encoder microcontroller drifting from the host.
      Effect on naive code: velocity estimates become less accurate over time.
 
-QoS: BEST_EFFORT — a subscriber using default RELIABLE will silently receive
-nothing. This is intentional and mirrors real rover behaviour.
+The tick count itself is exact when faults are off: the publisher keeps the
+fraction of a tick left over from each interval and carries it into the next,
+like a real encoder does (a physical wheel does not lose part of a pulse).
+
+QoS: BEST_EFFORT — a subscriber using default RELIABLE will receive nothing
+(ROS 2, and this shim, print an "incompatible QoS" warning, but it is easy to
+miss). This is intentional and mirrors real rover behaviour.
 """
 
 import math
@@ -36,6 +44,7 @@ from rclpy_lite.node import Node
 from rclpy_lite.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from ground_truth import GroundTruth
 from messages import WheelTicks
+from simclock import now as sim_now
 
 # Matches the constants given in the assessment task description
 WHEEL_RADIUS_M = 0.075
@@ -72,10 +81,11 @@ class EncoderPublisher:
         self._logger = self.node.get_logger()
 
         # Internal state
+        self._true_distance = 0.0       # true distance driven so far (metres)
         self._cumulative_ticks = 0      # true cumulative tick count
         self._reported_ticks = 0        # possibly corrupted reported count
         self._clock_offset = 0.0        # accumulated timestamp drift
-        self._last_time = time.time()
+        self._last_time = sim_now()
 
         # Spin in a background thread
         self._thread = threading.Thread(
@@ -84,22 +94,27 @@ class EncoderPublisher:
         self._thread.start()
 
     def _spin(self) -> None:
+        next_t = time.monotonic()
         while True:
-            start = time.time()
             self._publish_once()
-            elapsed = time.time() - start
-            sleep_for = max(0.0, PUBLISH_PERIOD - elapsed)
-            time.sleep(sleep_for)
+            next_t += PUBLISH_PERIOD          # fixed schedule, so the rate is 50 Hz, not "a bit under"
+            delay = next_t - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            else:
+                next_t = time.monotonic()     # fell behind: don't fire a burst to catch up
 
     def _publish_once(self) -> None:
-        now = time.time()
+        now = sim_now()
         dt = now - self._last_time
         self._last_time = now
 
-        # How many ticks should have fired in this interval?
-        true_distance = self._truth.distance_in_interval(dt)
-        true_delta = int(true_distance / DIST_PER_TICK)
-        self._cumulative_ticks += true_delta
+        # How many ticks should have fired in this interval? Work from the total
+        # distance so the fraction of a tick left over now is counted next time.
+        self._true_distance += self._truth.distance_in_interval(dt)
+        total_ticks = int(self._true_distance / DIST_PER_TICK)
+        true_delta = total_ticks - self._cumulative_ticks
+        self._cumulative_ticks = total_ticks
 
         # Apply noise
         reported_delta = true_delta

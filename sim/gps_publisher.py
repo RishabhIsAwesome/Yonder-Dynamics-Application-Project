@@ -20,8 +20,13 @@ Noise injected (representative of degraded RTK-GPS conditions):
 
   3. ELEVATED NOISE AFTER OUTAGE
      For ~10s after an outage, covariance is raised (σ ≈ 0.8m) to simulate
-     the receiver reacquiring satellites. Covariance gradually returns to
-     normal.
+     the receiver reacquiring satellites, then it steps back to normal.
+     The run starts at the beginning of a cycle, so the first 10s of every
+     run are also noisy (a cold start).
+
+     Each 45s cycle therefore looks like:
+         0s ─── 10s ─────────────── 40s ── 45s
+         noisy      normal          outage
 
 QoS: BEST_EFFORT — same as the real rover's GPS topic.
 """
@@ -35,6 +40,7 @@ from rclpy_lite.node import Node
 from rclpy_lite.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from ground_truth import GroundTruth
 from messages import GPSEstimate
+from simclock import now as sim_now
 
 PUBLISH_HZ = 1.0
 PUBLISH_PERIOD = 1.0 / PUBLISH_HZ
@@ -69,7 +75,7 @@ class GPSPublisher:
         self._pub = self.node.create_publisher(GPSEstimate, "/gps_estimate", qos)
         self._logger = self.node.get_logger()
 
-        self._run_start = time.time()
+        self._run_start = sim_now()
 
         self._thread = threading.Thread(
             target=self._spin, name="gps_publisher", daemon=True
@@ -77,14 +83,18 @@ class GPSPublisher:
         self._thread.start()
 
     def _spin(self) -> None:
+        next_t = time.monotonic()
         while True:
-            start = time.time()
             self._publish_once()
-            elapsed = time.time() - start
-            time.sleep(max(0.0, PUBLISH_PERIOD - elapsed))
+            next_t += PUBLISH_PERIOD
+            delay = next_t - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            else:
+                next_t = time.monotonic()   # fell behind: don't fire a burst to catch up
 
     def _publish_once(self) -> None:
-        now = time.time()
+        now = sim_now()
         phase = (now - self._run_start) % OUTAGE_CYCLE
 
         if self._faults:

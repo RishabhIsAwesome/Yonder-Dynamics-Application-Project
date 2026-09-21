@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
-import time as _time
+
+from simclock import now as _now
 
 
 @dataclass
 class Header:
-    stamp: float = field(default_factory=_time.time)  # seconds since epoch
+    stamp: float = field(default_factory=_now)  # seconds since epoch (simulator clock, never jumps back)
     frame_id: str = ""

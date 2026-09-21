@@ -4,6 +4,8 @@ geometry_msgs shim — mirrors real ROS 2 geometry_msgs field names exactly.
 
 from dataclasses import dataclass, field
 
+from std_msgs.msg import Header
+
 
 @dataclass
 class Vector3:
@@ -52,10 +54,20 @@ class TwistWithCovariance:
 
 
 @dataclass
-class TransformStamped:
-    """Used for TF2 stretch goal."""
-    header_stamp: float = 0.0
-    header_frame_id: str = ""        # parent frame
-    child_frame_id: str = ""         # child frame
+class Transform:
     translation: Vector3 = field(default_factory=Vector3)
     rotation: Quaternion = field(default_factory=Quaternion)
+
+
+@dataclass
+class TransformStamped:
+    """
+    Used for the TF2 stretch goals. Same field layout as the real ROS 2 message:
+      header.stamp / header.frame_id   the PARENT frame (e.g. "odom")
+      child_frame_id                   the CHILD frame (e.g. "base_link")
+      transform.translation / .rotation   the child's pose *relative to* the parent
+    (Only difference: header.stamp is float seconds, not builtin_interfaces/Time.)
+    """
+    header: Header = field(default_factory=Header)
+    child_frame_id: str = ""
+    transform: Transform = field(default_factory=Transform)

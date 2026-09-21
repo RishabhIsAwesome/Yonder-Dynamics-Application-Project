@@ -3,14 +3,52 @@ In-process topic message bus.
 
 Connects publishers and subscribers, enforces QoS compatibility exactly as
 real ROS 2 DDS does:
-  - BEST_EFFORT publisher + RELIABLE subscriber  → silent no-connection
+  - BEST_EFFORT publisher + RELIABLE subscriber  → no connection (with a warning)
   - BEST_EFFORT publisher + BEST_EFFORT subscriber → connected
   - RELIABLE publisher  + any subscriber          → connected
+
+Also mirrors two behaviours of a real rclpy program:
+  - Callbacks run one at a time (rclpy's default single-threaded executor), so
+    your node's callbacks never run at the same time and you do not need locks.
+  - An exception inside a callback is reported, not hidden. Unlike real rclpy
+    it does not stop the program, so one bad message does not end the run.
 """
 
+import logging
 import threading
-import time
+import traceback
 from typing import Any, Callable, Dict, List, Optional
+
+_log = logging.getLogger("rclpy")
+
+# One lock for every subscriber and timer callback in the process.
+_callback_lock = threading.RLock()
+
+# Identical errors are printed in full once, then counted, so a bug that fires
+# on every 50 Hz message does not bury the terminal.
+_error_counts: Dict[tuple, int] = {}
+_REPEAT_REPORT_AT = (10, 100, 1000, 10000, 100000)
+
+
+def run_callback(where: str, fn: Callable, *args) -> None:
+    """Run a subscriber/timer callback under the callback lock, reporting exceptions."""
+    with _callback_lock:
+        try:
+            fn(*args)
+        except Exception as exc:  # noqa: BLE001 - we want to report anything
+            key = (where, type(exc).__name__, str(exc))
+            n = _error_counts[key] = _error_counts.get(key, 0) + 1
+            if n == 1:
+                _log.error(
+                    "Exception in %s (your code raised this; the run continues):\n%s",
+                    where,
+                    traceback.format_exc().rstrip(),
+                )
+            elif n in _REPEAT_REPORT_AT:
+                _log.error(
+                    "Same exception in %s has now happened %d times: %s: %s",
+                    where, n, type(exc).__name__, exc,
+                )
 
 
 class _TopicEntry:
@@ -20,12 +58,17 @@ class _TopicEntry:
         self.subscribers: List["_SubEntry"] = []
         self.lock = threading.Lock()
 
+    def subs_snapshot(self) -> List["_SubEntry"]:
+        with self.lock:
+            return list(self.subscribers)
+
 
 class _SubEntry:
-    def __init__(self, callback: Callable, qos, node_name: str):
+    def __init__(self, callback: Callable, qos, node_name: str, handle):
         self.callback = callback
         self.qos = qos
         self.node_name = node_name
+        self.handle = handle  # the _Subscription the node holds; .connected is kept up to date
 
 
 class _Bus:
@@ -49,10 +92,6 @@ class _Bus:
     def __init__(self):
         self._topics: Dict[str, _TopicEntry] = {}
         self._lock = threading.RLock()
-        self._logger_fn: Callable[[str], None] = lambda msg: None
-
-    def set_logger(self, fn: Callable[[str], None]) -> None:
-        self._logger_fn = fn
 
     # ------------------------------------------------------------------
     # Publisher side
@@ -71,13 +110,10 @@ class _Bus:
             entry = self._topics.get(topic)
             if entry is None:
                 return
-            subs = list(entry.subs_snapshot())
+            subs = entry.subs_snapshot()
 
         for sub in subs:
-            try:
-                sub.callback(msg)
-            except Exception as exc:
-                self._logger_fn(f"[bus] callback error on {topic}: {exc}")
+            run_callback(f"subscription callback for '{topic}' ({sub.node_name})", sub.callback, msg)
 
     # ------------------------------------------------------------------
     # Subscriber side
@@ -90,9 +126,10 @@ class _Bus:
         callback: Callable,
         qos,
         node_name: str,
+        handle=None,
     ) -> bool:
         """
-        Returns True if connected, False if QoS mismatch (silent in log only).
+        Returns True if connected, False on a QoS mismatch (a warning is logged).
         """
         with self._lock:
             if topic not in self._topics:
@@ -103,15 +140,15 @@ class _Bus:
             pub_qos = entry.qos
 
             if pub_qos is not None and not _qos_compatible(pub_qos, qos):
-                self._logger_fn(
-                    f"[bus] QoS mismatch on '{topic}': "
-                    f"publisher={pub_qos.reliability.name}, "
-                    f"subscriber={qos.reliability.name} — "
-                    f"no connection (this is the same silent failure as real ROS 2)"
-                )
+                _warn_incompatible(topic, node_name, pub_qos, qos)
+                if handle is not None:
+                    handle.connected = False
                 return False
 
-            entry.subscribers.append(_SubEntry(callback, qos, node_name))
+            if handle is not None:
+                handle.connected = True
+            with entry.lock:
+                entry.subscribers.append(_SubEntry(callback, qos, node_name, handle))
             return True
 
     def late_connect_subscribers(self, topic: str, pub_qos) -> None:
@@ -124,17 +161,24 @@ class _Bus:
             if entry is None:
                 return
             compatible = []
-            for sub in entry.subscribers:
-                if _qos_compatible(pub_qos, sub.qos):
-                    compatible.append(sub)
-                else:
-                    self._logger_fn(
-                        f"[bus] QoS mismatch on '{topic}': "
-                        f"publisher={pub_qos.reliability.name}, "
-                        f"subscriber={sub.qos.reliability.name} — "
-                        f"no connection"
-                    )
-            entry.subscribers = compatible
+            with entry.lock:
+                for sub in entry.subscribers:
+                    if _qos_compatible(pub_qos, sub.qos):
+                        compatible.append(sub)
+                    else:
+                        _warn_incompatible(topic, sub.node_name, pub_qos, sub.qos)
+                        if sub.handle is not None:
+                            sub.handle.connected = False
+                entry.subscribers = compatible
+
+
+def _warn_incompatible(topic: str, node_name: str, pub_qos, sub_qos) -> None:
+    _log.warning(
+        "Subscription to '%s' in node '%s' has incompatible QoS with the publisher: "
+        "publisher offers %s, subscriber requests %s. No messages will be delivered "
+        "(policy: RELIABILITY_QOS_POLICY).",
+        topic, node_name, pub_qos.reliability.name, sub_qos.reliability.name,
+    )
 
 
 def _qos_compatible(pub_qos, sub_qos) -> bool:
@@ -151,12 +195,3 @@ def _qos_compatible(pub_qos, sub_qos) -> bool:
     if pub_qos.reliability == ReliabilityPolicy.BEST_EFFORT:
         return sub_qos.reliability == ReliabilityPolicy.BEST_EFFORT
     return True
-
-
-# Patch the _TopicEntry to expose a snapshot method
-def _subs_snapshot(self):
-    with self.lock:
-        return list(self.subscribers)
-
-
-_TopicEntry.subs_snapshot = _subs_snapshot
