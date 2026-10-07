@@ -83,6 +83,14 @@ class OdometryNode(Node):
         #     WheelTicks, "/wheel_ticks", self.wheel_tick_callback, ???
         # )
 
+        wheel_qos = QoSProfile(
+                    reliability=ReliabilityPolicy.BEST_EFFORT,
+                    depth=10,
+                )
+
+        self.tick_sub = self.create_subscription(WheelTicks, "/wheel_ticks", self.wheel_tick_callback, wheel_qos)
+
+
         # TODO: Create a subscriber for /gps_estimate (same QoS considerations).
         #
         # self.gps_sub = self.create_subscription(

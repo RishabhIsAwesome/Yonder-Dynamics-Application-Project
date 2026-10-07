@@ -21,3 +21,13 @@ Replace this template with your own entries. Add one entry per significant use o
 **What the AI got wrong that I had to catch:**
 
 **How I verified it ran correctly (not just that it compiled):**
+
+## 3. <next use>
+
+**What I asked:**
+
+**What I kept vs. rewrote, and why:**
+
+**What the AI got wrong that I had to catch:**
+
+**How I verified it ran correctly (not just that it compiled):**
