@@ -174,19 +174,19 @@ class OdometryNode(Node):
         #   1. Handle first message (initialise last_tick_count / last_tick_time).
         if self.last_tick_count == None:
             self.last_tick_count = msg.tick_count
-            self.last_tick_time = time.monotonic()
+            self.last_tick_time = msg.timestamp
             return
 
         #   2. Compute delta_ticks = msg.tick_count - self.last_tick_count
         delta_ticks = msg.tick_count - self.last_tick_count
-        delta_time = time.monotonic() - self.last_tick_time
+        delta_time = msg.timestamp - self.last_tick_time
 
         #   3. Guard against duplicate (delta_ticks == 0 and delta_time ≈ 0).
         if delta_ticks == 0 and delta_time == 0:
             return
 
         self.last_tick_count = msg.tick_count
-        self.last_tick_time = time.monotonic()
+        self.last_tick_time = msg.timestamp
 
         #   4. Convert ticks to distance: distance = delta_ticks * DIST_PER_TICK
         distance = delta_ticks * DIST_PER_TICK
