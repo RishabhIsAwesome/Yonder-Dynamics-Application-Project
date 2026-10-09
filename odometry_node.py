@@ -84,9 +84,9 @@ class OdometryNode(Node):
         # )
 
         wheel_qos = QoSProfile(
-                    reliability=ReliabilityPolicy.BEST_EFFORT,
-                    depth=10,
-                )
+            reliability = ReliabilityPolicy.BEST_EFFORT,
+            depth=10,
+        )
 
         self.tick_sub = self.create_subscription(WheelTicks, "/wheel_ticks", self.wheel_tick_callback, wheel_qos)
 
@@ -96,6 +96,13 @@ class OdometryNode(Node):
         # self.gps_sub = self.create_subscription(
         #     GPSEstimate, "/gps_estimate", self.gps_callback, ???
         # )
+
+        gps_qos = QoSProfile(
+            reliability = ReliabilityPolicy.BEST_EFFORT,
+            depth=10,
+        )
+        
+        self.gps_sub = self.create_subscription(GPSEstimate, "/gps_estimate", self.gps_callback, gps_qos)
 
         # ------------------------------------------------------------------
         # Publisher
@@ -125,6 +132,9 @@ class OdometryNode(Node):
 
         self.last_tick_count: int | None = None
         self.last_tick_time: float | None = None
+
+        self.last_gps_x: float | None = None
+        self.last_gps_y: float | None = None
 
         self.last_gps_time: float | None = None
         self.last_wheel_time: float | None = None
@@ -196,9 +206,8 @@ class OdometryNode(Node):
                 #      it is FACING. Ticks tell you how far, not which way. Where does your
                 #      heading come from and how does it change? See "Heading is not
                 #      measured" in the README before you write this line.
-        self.heading = 0; #temporary placeholder
-        self.x += distance
-        self.y += 0;
+        self.x += distance * math.cos(self.heading)
+        self.y += distance * math.sin(self.heading)
         
         #   6. Call self.publish_odometry().
         self.publish_odometry()
@@ -232,12 +241,28 @@ class OdometryNode(Node):
             (That's Stretch Goal B — but even a fixed weighting is fine here.)
         """
         # TODO: implement
-        #
-        # Suggested approach:
+
+        # Heading calculation
+        if self.last_gps_x != None:
+            delta_gps_x = msg.x - self.last_gps_x
+            delta_gps_y = msg.y - self.last_gps_y
+            self.heading = math.atan2(delta_gps_y, delta_gps_x)
+
+        self.last_gps_x = msg.x
+        self.last_gps_y = msg.y
+
         #   1. Compute a weight w_gps based on msg.covariance (lower cov = higher trust).
+        w_gps = .2
+
         #   2. Blend: self.x = (1 - w_gps) * self.x + w_gps * msg.x
         #             self.y = (1 - w_gps) * self.y + w_gps * msg.y
+        self.x = (1 - w_gps) * self.x + w_gps * msg.x
+        self.y = (1 - w_gps) * self.y + w_gps * msg.y
+
         #   3. Update self.last_gps_time = msg.timestamp
+        self.last_gps_time = msg.timestamp
+
+
         pass
 
     # -----------------------------------------------------------------------
