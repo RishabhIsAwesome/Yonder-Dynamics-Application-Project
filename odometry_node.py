@@ -104,6 +104,9 @@ class OdometryNode(Node):
         #
         # self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
 
+        self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
+
+
         # ------------------------------------------------------------------
         # Timer — 1 Hz monitoring output
         # ------------------------------------------------------------------
@@ -118,6 +121,7 @@ class OdometryNode(Node):
         self.y: float = 0.0                  # fused position, metres (north)
         self.heading: float = 0.0            # radians. The rover starts facing EAST (0 rad);
                                              # x is east, y is north, counter-clockwise is positive
+        self.velocity: float = 0.0
 
         self.last_tick_count: int | None = None
         self.last_tick_time: float | None = None
@@ -166,17 +170,40 @@ class OdometryNode(Node):
             DIST_PER_TICK   metres per encoder tick (~0.00131 m)
         """
         # TODO: implement
-        #
-        # Suggested approach:
+
         #   1. Handle first message (initialise last_tick_count / last_tick_time).
+        if self.last_tick_count == None:
+            self.last_tick_count = msg.tick_count
+            self.last_tick_time = time.monotonic()
+            return
+
         #   2. Compute delta_ticks = msg.tick_count - self.last_tick_count
+        delta_ticks = msg.tick_count - self.last_tick_count
+        delta_time = time.monotonic() - self.last_tick_time
+
         #   3. Guard against duplicate (delta_ticks == 0 and delta_time ≈ 0).
+        if delta_ticks == 0 and delta_time == 0:
+            return
+
+        self.last_tick_count = msg.tick_count
+        self.last_tick_time = time.monotonic()
+
         #   4. Convert ticks to distance: distance = delta_ticks * DIST_PER_TICK
+        distance = delta_ticks * DIST_PER_TICK
+        self.velocity = distance / delta_time
+
         #   5. Update self.x and self.y: the rover moves `distance` in the direction
-        #      it is FACING. Ticks tell you how far, not which way. Where does your
-        #      heading come from and how does it change? See "Heading is not
-        #      measured" in the README before you write this line.
+                #      it is FACING. Ticks tell you how far, not which way. Where does your
+                #      heading come from and how does it change? See "Heading is not
+                #      measured" in the README before you write this line.
+        self.heading = 0; #temporary placeholder
+        self.x += distance
+        self.y += 0;
+        
         #   6. Call self.publish_odometry().
+        self.publish_odometry()
+
+
         pass
 
     # -----------------------------------------------------------------------
@@ -239,6 +266,26 @@ class OdometryNode(Node):
         Not every field is required — position is the minimum.
         """
         # TODO: implement
+
+        msg = Odometry()
+
+        msg.header.stamp = time.time()
+        msg.header.frame_id = "odom"
+        msg.child_frame_id = "base_link"
+
+        msg.pose.pose.position.x = self.x
+        msg.pose.pose.position.y = self.y
+
+        msg.pose.pose.orientation.x = 0.0
+        msg.pose.pose.orientation.y = 0.0
+        msg.pose.pose.orientation.z = math.sin(self.heading / 2.0)
+        msg.pose.pose.orientation.w = math.cos(self.heading / 2.0)
+
+        msg.twist.twist.linear.x = self.velocity
+
+        self.odom_pub.publish(msg)
+
+
         pass
 
     # -----------------------------------------------------------------------
