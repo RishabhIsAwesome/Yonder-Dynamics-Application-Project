@@ -48,35 +48,3 @@ I kept everything the function wrote, but I had to add an extra variable to keep
 The AI calculated gps_age with an error since it wrote "now - self.last_gps_time." This resulted in the number in the log being highly innacurrate as one of the variables used time.monotonic() while the other variable used msg.timestamp, which use two different clocks. I fixed this error by creating a new variable in the gps_callback function that used time.monotonic() to keep track of time instead of msg.timestamp.
 **How I verified it ran correctly (not just that it compiled):**
 I verified that the program ran correctly by checking the log and making sure that the values that werebeing outputted made sense.
-
-## 5. <next use>
-
-**What I asked:**
-
-**What I kept vs. rewrote, and why:**
-
-**What the AI got wrong that I had to catch:**
-
-**How I verified it ran correctly (not just that it compiled):**
-
-
-## 6. <next use>
-
-**What I asked:**
-
-**What I kept vs. rewrote, and why:**
-
-**What the AI got wrong that I had to catch:**
-
-**How I verified it ran correctly (not just that it compiled):**
-
-
-## 7. <next use>
-
-**What I asked:**
-
-**What I kept vs. rewrote, and why:**
-
-**What the AI got wrong that I had to catch:**
-
-**How I verified it ran correctly (not just that it compiled):**
