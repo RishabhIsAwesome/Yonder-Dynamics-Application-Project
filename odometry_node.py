@@ -135,14 +135,11 @@ class OdometryNode(Node):
         self.last_tick_count: int | None = None
         self.last_tick_time: float | None = None
 
-        self.last_gps_x: float | None = None
-        self.last_gps_y: float | None = None
-
         self.gps_position_history: list[tuple[float, float]] = []
         self.gps_heading_window: int = 5
 
         self.last_gps_time: float | None = None
-        self.last_gps_time_montonic: float | None = None
+        self.last_gps_time_monotonic: float | None = None
         self.last_wheel_time: float | None = None
 
         self.wheel_msg_count: int = 0
@@ -251,7 +248,7 @@ class OdometryNode(Node):
         """
         # TODO: implement
 
-        self.last_gps_time_montonic = time.monotonic()
+        self.last_gps_time_monotonic = time.monotonic()
 
         # Store multiple GPS readings instead of using only the previous GPS point.
         self.gps_position_history.append((msg.x, msg.y))
@@ -276,9 +273,6 @@ class OdometryNode(Node):
             # Only update heading when there is enough movement for the direction to be meaningful.
             if math.hypot(delta_gps_x, delta_gps_y) > 0.1:
                 self.heading = math.atan2(delta_gps_y, delta_gps_x)
-
-        self.last_gps_x = msg.x
-        self.last_gps_y = msg.y
 
         #   1. Compute a weight w_gps based on msg.covariance (lower cov = higher trust).
         w_gps = .2
@@ -374,8 +368,8 @@ class OdometryNode(Node):
             wheel_age = float("inf")
 
         # Calculate time since the last GPS message
-        if self.last_gps_time_montonic is not None:
-            gps_age = now - self.last_gps_time_montonic
+        if self.last_gps_time_monotonic is not None:
+            gps_age = now - self.last_gps_time_monotonic
         else:
             gps_age = float("inf")
 
