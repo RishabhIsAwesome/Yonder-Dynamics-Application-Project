@@ -395,19 +395,19 @@ We don't expect a perfect implementation. Those who show genuine effort and lear
 
 *Candidates: replace this section with your own short write-up. Keep it to what a teammate would need to trust your implementation.*
 
-- **Fusion approach.** How do you weight GPS vs wheel odometry? Does the weighting change over time or with signal quality?
+- **Fusion approach:**
   The GPS weighting is at 0.2 and is fixed. Through testing, this was generally the most consistent fixed weighting, but it can be improved upon with dynamic fusion weighting.
-- **Heading.** Where does your heading (and its rate of change) come from? What did you assume about the path, and what would break your approach?
+- **Heading:**
   The heading is calculated by taking the average of the past 5 GPS readings received, finding the difference in x and y of the current position and that average, and then using that difference in x and y to calculate the angle of the heading in radians (using math.atan2(y,x)).
-- **Noise handling.** What did you detect, how, and what happens when you detect it? Which noise can't be detected, and how do you know it is affecting your estimate without correction?
+- **Noise handling:**
   Duplicate ticks are detected from the encoders. Duplicate ticks are guarded against by having the wheel_tick_callback function return immediately upon detecting that delta_ticks and delta_time both equal 0. The delta_ticks and delta_time variables are calculated by taking the current tick's tick count and time and respectively subtracting the last tick count and tick time from it.
-- **Monitoring output.** What thresholds did you choose for staleness warnings and why?
+- **Monitoring output:**
   The current monitoring output reports the time since the last wheel and GPS messages rather than issuing explicit staleness warnings. If I had stale warnings, I would use 0.1 s for wheel data and 2 s for GPS data. Wheel messages normally arrive at approximately 50 Hz (about every 0.02 s), so 0.1 s allows for several missed messages before considering the data stale. GPS readings normally arrives at approximately 1 Hz, so 2 s allows one missed update while still detecting a sustained outage.
-- **Ambiguity.** What did the task leave underspecified, and what call did you make?
+- **Ambiguity:**
   The task did not specify how I could get the heading for the simulated rover. I decided originally that it would be best to obtain my heading between the last and current GPS readings, but that proved to be inconsistent. I ended up pivoting to making a list of past GPS readings and using the average of that list to help find a heading.
-- **Testing.** How did you verify it was actually working correctly, not just running? What did you check with `--visualize`?
-  I usually verified that the program was working by checking the error chart below. I compared different methods of getting headings by looking at the difference between the errors on the chart in comparison to the GPS reading errors.
-- **Stretch goals.** Which did you attempt, and how far did you get?
+- **Testing:**
+  I usually verified that the program was working by checking the error chart below with `--visualize`. I compared different methods of getting headings by looking at the difference between the errors on the chart in comparison to the GPS reading errors.
+- **Stretch goals:**
   I unfortunately could not get to any stretch goals.
 
 ---
