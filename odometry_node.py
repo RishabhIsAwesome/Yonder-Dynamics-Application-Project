@@ -120,6 +120,8 @@ class OdometryNode(Node):
         # TODO: Create a timer that calls self.monitoring_callback once per second.
         #
         # self.monitor_timer = self.create_timer(1.0, self.monitoring_callback)
+        self.monitor_timer = self.create_timer(1.0, self.monitoring_callback)
+
 
         # ------------------------------------------------------------------
         # State  — add whatever you need
@@ -136,12 +138,11 @@ class OdometryNode(Node):
         self.last_gps_x: float | None = None
         self.last_gps_y: float | None = None
 
-        # CHANGED: keep several GPS readings so heading is based on
-        # an average position instead of only the previous reading.
         self.gps_position_history: list[tuple[float, float]] = []
         self.gps_heading_window: int = 5
 
         self.last_gps_time: float | None = None
+        self.last_gps_time_montonic: float | None = None
         self.last_wheel_time: float | None = None
 
         self.wheel_msg_count: int = 0
@@ -186,8 +187,11 @@ class OdometryNode(Node):
         """
         # TODO: implement
 
+        self.last_wheel_time = time.monotonic()
+        self.wheel_msg_count += 1
+
         #   1. Handle first message (initialise last_tick_count / last_tick_time).
-        if self.last_tick_count == None:
+        if self.last_tick_count is None:
             self.last_tick_count = msg.tick_count
             self.last_tick_time = msg.timestamp
             return
@@ -247,18 +251,16 @@ class OdometryNode(Node):
         """
         # TODO: implement
 
-        # CHANGED: store multiple GPS readings instead of using only
-        # the previous GPS point.
+        self.last_gps_time_montonic = time.monotonic()
+
+        # Store multiple GPS readings instead of using only the previous GPS point.
         self.gps_position_history.append((msg.x, msg.y))
 
-        # CHANGED: keep only the most recent readings in the window.
+        # Keep only the 5 most recent readings in the window.
         if len(self.gps_position_history) > self.gps_heading_window:
             self.gps_position_history.pop(0)
 
-        # CHANGED: find the average GPS position in the window.
-        # Then calculate delta x/y from that average position to
-        # the newest GPS reading. This reduces the effect of one
-        # noisy GPS reading on the heading.
+        # Find average GPS position for x and y
         if len(self.gps_position_history) >= 2:
             average_x = sum(
                 position[0] for position in self.gps_position_history
@@ -271,8 +273,7 @@ class OdometryNode(Node):
             delta_gps_x = msg.x - average_x
             delta_gps_y = msg.y - average_y
 
-            # CHANGED: only update heading when there is enough
-            # movement for the direction to be meaningful.
+            # Only update heading when there is enough movement for the direction to be meaningful.
             if math.hypot(delta_gps_x, delta_gps_y) > 0.1:
                 self.heading = math.atan2(delta_gps_y, delta_gps_x)
 
@@ -289,6 +290,7 @@ class OdometryNode(Node):
 
         #   3. Update self.last_gps_time = msg.timestamp
         self.last_gps_time = msg.timestamp
+
 
 
         pass
@@ -362,6 +364,37 @@ class OdometryNode(Node):
             [odom] pos=(1.23, 0.45)m  enc=0.02s ago @49.8Hz  gps=0.91s ago
         """
         # TODO: implement
+
+        now = time.monotonic()
+
+        # Calculate time since the last wheel message
+        if self.last_wheel_time is not None:
+            wheel_age = now - self.last_wheel_time
+        else:
+            wheel_age = float("inf")
+
+        # Calculate time since the last GPS message
+        if self.last_gps_time_montonic is not None:
+            gps_age = now - self.last_gps_time_montonic
+        else:
+            gps_age = float("inf")
+
+        # Calculate average wheel message rate
+        elapsed = now - self.start_time
+
+        if elapsed > 0:
+            wheel_rate = self.wheel_msg_count / elapsed
+        else:
+            wheel_rate = 0.0
+
+        print(
+            f"[odom] "
+            f"pos=({self.x:.2f}, {self.y:.2f})m  "
+            f"enc={wheel_age:.2f}s ago @ {wheel_rate:.1f}Hz  "
+            f"gps={gps_age:.2f}s ago"
+        )
+
+
         pass
 
 
