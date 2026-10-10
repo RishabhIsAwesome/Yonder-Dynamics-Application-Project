@@ -26,12 +26,12 @@ N/A
 The blue line appears on the simulation
 
 
-## 3. <next use>
+## 3. <Making a list of past GPS readings>
 
 **What I asked:**
-
+I asked it to make a list of past GPS readings and to use that history's baseline to make the heading more consistent.
 **What I kept vs. rewrote, and why:**
-
+This is a work in-progress right now. I am still experimenting with ways to make the heading more consistent.
 **What the AI got wrong that I had to catch:**
 
 **How I verified it ran correctly (not just that it compiled):**

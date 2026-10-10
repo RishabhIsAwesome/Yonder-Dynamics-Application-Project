@@ -136,6 +136,10 @@ class OdometryNode(Node):
         self.last_gps_x: float | None = None
         self.last_gps_y: float | None = None
 
+        # CHANGED: keep several GPS readings for a more stable heading.
+        self.gps_heading_history: list[tuple[float, float]] = []
+        self.gps_heading_window: int = 5
+
         self.last_gps_time: float | None = None
         self.last_wheel_time: float | None = None
 
@@ -242,11 +246,22 @@ class OdometryNode(Node):
         """
         # TODO: implement
 
-        # Heading calculation
-        if self.last_gps_x != None:
-            delta_gps_x = msg.x - self.last_gps_x
-            delta_gps_y = msg.y - self.last_gps_y
-            self.heading = math.atan2(delta_gps_y, delta_gps_x)
+        # CHANGED: calculate heading using multiple GPS readings instead of
+        # only the previous reading. A longer baseline reduces GPS noise.
+        self.gps_heading_history.append((msg.x, msg.y))
+
+        if len(self.gps_heading_history) > self.gps_heading_window:
+            self.gps_heading_history.pop(0)
+
+        if len(self.gps_heading_history) >= 2:
+            oldest_x, oldest_y = self.gps_heading_history[0]
+
+            delta_gps_x = msg.x - oldest_x
+            delta_gps_y = msg.y - oldest_y
+
+            # Ignore tiny movements
+            if math.hypot(delta_gps_x, delta_gps_y) > 0.1:
+               self.heading = math.atan2(delta_gps_y, delta_gps_x)
 
         self.last_gps_x = msg.x
         self.last_gps_y = msg.y
