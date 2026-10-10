@@ -136,8 +136,9 @@ class OdometryNode(Node):
         self.last_gps_x: float | None = None
         self.last_gps_y: float | None = None
 
-        # CHANGED: keep several GPS readings for a more stable heading.
-        self.gps_heading_history: list[tuple[float, float]] = []
+        # CHANGED: keep several GPS readings so heading is based on
+        # an average position instead of only the previous reading.
+        self.gps_position_history: list[tuple[float, float]] = []
         self.gps_heading_window: int = 5
 
         self.last_gps_time: float | None = None
@@ -246,22 +247,34 @@ class OdometryNode(Node):
         """
         # TODO: implement
 
-        # CHANGED: calculate heading using multiple GPS readings instead of
-        # only the previous reading. A longer baseline reduces GPS noise.
-        self.gps_heading_history.append((msg.x, msg.y))
+        # CHANGED: store multiple GPS readings instead of using only
+        # the previous GPS point.
+        self.gps_position_history.append((msg.x, msg.y))
 
-        if len(self.gps_heading_history) > self.gps_heading_window:
-            self.gps_heading_history.pop(0)
+        # CHANGED: keep only the most recent readings in the window.
+        if len(self.gps_position_history) > self.gps_heading_window:
+            self.gps_position_history.pop(0)
 
-        if len(self.gps_heading_history) >= 2:
-            oldest_x, oldest_y = self.gps_heading_history[0]
+        # CHANGED: find the average GPS position in the window.
+        # Then calculate delta x/y from that average position to
+        # the newest GPS reading. This reduces the effect of one
+        # noisy GPS reading on the heading.
+        if len(self.gps_position_history) >= 2:
+            average_x = sum(
+                position[0] for position in self.gps_position_history
+            ) / len(self.gps_position_history)
 
-            delta_gps_x = msg.x - oldest_x
-            delta_gps_y = msg.y - oldest_y
+            average_y = sum(
+                position[1] for position in self.gps_position_history
+            ) / len(self.gps_position_history)
 
-            # Ignore tiny movements
+            delta_gps_x = msg.x - average_x
+            delta_gps_y = msg.y - average_y
+
+            # CHANGED: only update heading when there is enough
+            # movement for the direction to be meaningful.
             if math.hypot(delta_gps_x, delta_gps_y) > 0.1:
-               self.heading = math.atan2(delta_gps_y, delta_gps_x)
+                self.heading = math.atan2(delta_gps_y, delta_gps_x)
 
         self.last_gps_x = msg.x
         self.last_gps_y = msg.y
